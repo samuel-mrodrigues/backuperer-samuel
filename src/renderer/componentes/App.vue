@@ -1,15 +1,21 @@
 <template>
-  <img alt="Vue logo" src="./assets/logo.png">
-  <HelloWorld msg="Welcome to Your Vue.js App"/>
+  <div>
+    <h1>OI GENTE</h1>
+
+    <button @click="teste()">Oi</button>
+  </div>
 </template>
 
 <script>
-import HelloWorld from './components/HelloWorld.vue'
+import fs from "fs";
 
 export default {
   name: 'App',
-  components: {
-    HelloWorld
+  methods: {
+    teste() {
+      // console.log(dialog, app, ipcRenderer);
+      console.log(fs.existsSync('./teste.txt'))
+    }
   }
 }
 </script>
