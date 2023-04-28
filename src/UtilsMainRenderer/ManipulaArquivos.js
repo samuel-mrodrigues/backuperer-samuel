@@ -58,10 +58,15 @@ class Arquivo {
      */
     criarArquivo(substituirExistente = false) {
 
+
         if (this.existe() && !substituirExistente) return true;
 
+        let caminhoDiretorio = path.dirname(this.caminhoArquivo);
+
         // Verifica se os diretorios até o arquivo existe
-        criarDiretoriosInexistentes(this.caminhoArquivo)
+        if (!fs.existsSync(caminhoDiretorio)) {
+            fs.mkdirSync(caminhoDiretorio, { recursive: true });
+        }
 
         try {
             fs.writeFileSync(this.caminhoArquivo, "");
@@ -234,45 +239,4 @@ export class ArquivoTXT extends Arquivo {
             return false;
         }
     }
-}
-
-/**
- * Cria todos os diretorios inexistentes até um certo ponto.
- ** Exemplo, passando o parametro C:/Users/Desktop/teste1/teste2/testes.json, digamos que as pastas teste1 e teste2 não existam, elas serão criadas.
- ** Nomes de arquivos são ignorados, somente pastas são criadas
- * @param {String} diretorioAlvo 
- * @return {Boolean} True/false se não foi possível gerar os diretorios
- */
-function criarDiretoriosInexistentes(diretorioAlvo) {
-    // Substituir outras barras diferentes 
-    diretorioAlvo = diretorioAlvo.replaceAll("\\", "/");
-
-    // Separa em um array o caminho ate a pasta final
-    let diretoriosEncontrados = diretorioAlvo.split("/");
-
-    // O diretorio inicial já com o primeiro preenchido
-    let diretorioAtual = diretoriosEncontrados.shift()
-    for (const diretorio of diretoriosEncontrados) {
-
-        // Junta o proximo diretorio com o anterior
-        diretorioAtual += `/${diretorio}`
-
-        // Se o nome da pasta conter pontos mas não for o ultimo caminho, eu gero a pasta, verificar pq pode ter sido indicado um caminho de arquivo no final
-        if (diretorio.indexOf(".") != -1 && (diretoriosEncontrados[diretoriosEncontrados.length - 1] == diretorio)) {
-            break;
-        }
-
-        // Se não existir o diretorio, tentar criar
-        if (!fs.existsSync(diretorioAtual)) {
-            try {
-                // fs.mkdirSync(diretorioAtual);
-                console.log(`Criando diretorio ${diretorioAtual}`);
-            } catch (ex) {
-                console.log(ex);
-                console.log(`Não foi possível criar o diretorio: ${diretorioAtual}`);
-                return false;
-            }
-        }
-    }
-    return true;
 }

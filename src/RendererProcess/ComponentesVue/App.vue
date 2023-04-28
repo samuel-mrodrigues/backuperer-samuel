@@ -7,14 +7,11 @@
 </template>
 
 <script>
-import fs from "fs";
-
 export default {
   name: 'App',
   methods: {
     teste() {
-      // console.log(dialog, app, ipcRenderer);
-      console.log(fs.existsSync('./teste.txt'))
+
     }
   }
 }

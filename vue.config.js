@@ -5,9 +5,8 @@ module.exports = defineConfig({
     electronBuilder: {
       nodeIntegration: true,
       contextIsolation: false,
-      mainProcessFile: 'src/main/ProcessoPrincipal.js',
-      preload: 'src/main/preload/PreloadRenderer.js',
-      rendererProcessFile: 'src/renderer/InicioVue.js',
+      mainProcessFile: 'src/MainProcess/ProcessoPrincipal.js',
+      rendererProcessFile: 'src/RendererProcess/InicioVue.js',
       chainWebpackMainProcess: config => {
         config.module
           .rule('babel')
