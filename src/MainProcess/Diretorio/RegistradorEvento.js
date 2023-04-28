@@ -1,21 +1,29 @@
 import fs from "fs";
 
-import { EmissorEvento } from "@/UtilsMainRenderer/EventoEmissor.js";
-import { lerDiretorio } from "@/UtilsMainRenderer/LerDiretorio.js";
 import { Diretorio } from "./Diretorio.js";
+import { EmissorEvento } from "@/UtilsMainRenderer/EventoEmissor.js";
 
+import { lerDiretorio } from "@/UtilsMainRenderer/LerDiretorio.js";
+import { getIndexSistemaLink } from "../Utils/Utils.js";
 
+/**
+ * O registrador de eventos recebe e manipula os eventos(novo, excluir, renomear) e repassam ao diretorio exatamente a ação que foi realizada.
+ */
 export class RegistradorEvento {
 
     /**
+     * A instância do diretório em que esse registrador está vinculado. Todos os eventos serão repassados a esse diretorio
      * @type {Diretorio}
      */
     instanciaDiretorio;
 
+    /**
+     * Listener do tipo EventEmitter, para emitir os eventos e escutar por eles
+     */
     gerenciadorListener = new EmissorEvento();
 
     /**
-     * 
+     * Instancia um registrador de evento para receber os eventos de um diretorio
      * @param {Diretorio} instancia_diretorio 
      */
     constructor(instancia_diretorio) {
@@ -23,16 +31,20 @@ export class RegistradorEvento {
     }
 
     /**
-     * 
-     * @param {String} arquivoAlvo 
-     * @param {'rename' | 'change' | 'error' | 'close'} tipoMudanca 
+     * Disparar um evento para processar no diretorio
+     * @param {String} arquivoAlvo - O nome do link envolvido. Será o caminho do diretorio inicial que foi setado para observar até o caminho do link
+     * @param {'rename' | 'change' | 'error' | 'close'} tipoMudanca - O tipo de mudança que ocorreu 
      */
     dispararEvento(arquivoAlvo, tipoMudanca) {
         this.log(`Processando evento ${tipoMudanca} em -> ${arquivoAlvo}`);
 
+        // Dividir o caminho do evento em diretorios para saber qual o proximo diretorio para repassar o evento
+        // É necessário isso, pois mudanças em algum subdiretório do tipo: meudiretorio/testes/arquivo.txt, o evento é recebido em meudiretório,
+        // Mas o diretorio que precisa processar essa mudança será o diretorio pai do link que está sendo modificado, que no caso seria o testes
         let pastasCaminho = arquivoAlvo.split("\\")
 
         if (pastasCaminho.length != 1) {
+            // Se tiver diretórios para repassar, encontrar o próximo e repassar
             let proximoDiretorio = this.instanciaDiretorio.diretorios.find(dirObj => dirObj.nome == pastasCaminho[0]);
 
             if (proximoDiretorio == undefined) {
@@ -40,10 +52,19 @@ export class RegistradorEvento {
                 return;
             }
 
+            // Remover esse diretório da string e repassar para o próximo
             pastasCaminho.shift();
             proximoDiretorio.gerenciadorEventos.dispararEvento(pastasCaminho.join('\\'), tipoMudanca);
         } else {
+            // Não contendo mais diretorios, o link deve ser processar por esse diretorio atual
+
+            // Verificar o tipo do evento e chamar a função apropriadade que irá tratar dela.
             switch (tipoMudanca) {
+
+                // O tipo rename é usado em situações de:
+                // Um link foi criado
+                // Um link foi renomeado
+                // Um link foi excluido
                 case "rename": {
                     this.tratarRename(arquivoAlvo)
                     break;
@@ -52,24 +73,33 @@ export class RegistradorEvento {
         }
     }
 
+    /**
+     * Tratar o evento de rename no link atual nesse diretorio
+     * @param {String} nomeLink - Nome do link(arquivo/diretorio) alterado
+     ** Somente o nome do link, sem incluir diretorios!
+     */
     tratarRename(nomeLink) {
         this.log(`Processando rename em ${nomeLink}`)
+
+        // Caminho completo do link, do diretorio do sistema até chegar ao link em questão.
         let caminhoCompletoLink = `${this.instanciaDiretorio.caminhoCompletoDiretorio}\\${nomeLink}`
         this.log(`Caminho do arquivo completo: ${caminhoCompletoLink}`)
 
         let existeLinkFisicamente = fs.existsSync(caminhoCompletoLink);
         this.log(`Existe fisicamente? ${existeLinkFisicamente}`)
 
-        // Se o link existir, o arquivo foi criado ou renomeado
+        // Se o link existir, ele foi criado ou renomeado
         if (existeLinkFisicamente) {
-            let linkPropriedades = fs.statSync(caminhoCompletoLink);
-            let indexSistemaDoLink = `${linkPropriedades.ino}${linkPropriedades.dev}`;
+
+            // Retorna o id unico do link no sistema
+            let indexSistemaDoLink = getIndexSistemaLink(caminhoCompletoLink)
 
             // Verificar na instancia do diretorio se existe algum link com o id unico desse link
             let existeLinkNoDiretorio = this.instanciaDiretorio.existeLink(undefined, indexSistemaDoLink)
 
-            // Se o link não existir, é pq o arquivo não existe no cache do diretorio e foi criado recentemente
+            // Se o link não existir, é pq o link não existe no cache do diretorio e foi criado recentemente
             if (!existeLinkNoDiretorio) {
+
                 // Disparar o evento correspondente correto para o diretorio saber que tem um novo tipo de link sendo criado
                 if (linkPropriedades.isDirectory()) {
                     this.gerenciadorListener.dispararEvento(RegistradorEventoTiposEventos.DIRETORIO_CRIADO, nomeLink);
@@ -81,25 +111,37 @@ export class RegistradorEvento {
             }
 
         } else {
+            // Se o link não existir fisicamente, ele foi renomeado ou excluido
+
+            // O evento de renomear emite duas vezes
+            // É emitido um rename com o nome antigo do arquivo
+            // É emitido um outro evento rename com o nome novo, que é tratado no if acima
+
             // Pegar se o link é um diretorio ou um arquivo
             let tipoDoLinkNoCache = this.instanciaDiretorio.getTipoLink(nomeLink);
 
-            // Arquivos e diretorios existentes 
+            // Leio o diretorio para achar arquivos e diretorios existentes 
             let linksDiretorio = lerDiretorio(this.instanciaDiretorio.caminhoCompletoDiretorio);
 
             // Se for um arquivo
             if (tipoDoLinkNoCache == "arquivo") {
 
+                // Tenta encontrar o arquivo no cache do diretorio
                 let arquivoNoCache = this.instanciaDiretorio.arquivos.find(arqObj => arqObj.nomeArquivo == nomeLink);
                 if (arquivoNoCache != undefined) {
 
+                    // Se o arquivo existe ainda ou não
                     let arquivoExisteAinda = false;
+
+                    // Se o arquivo foi renomeado, salvar o novo nome dele
                     let novoNomeSeRenomeado = '';
 
+                    // Passar pelos arquivos encontrados na leitura, e verificar se o id unico dele combina com o que existe no cache, significando que foi renomeado
+                    // Se não achar, é pq ele foi deletado
                     for (const arquivoEncontrado of linksDiretorio.arquivos) {
-                        let arquivoPropriedades = fs.statSync(arquivoEncontrado.caminhoCompleto);
-                        let indexSistemaDoArquivo = `${arquivoPropriedades.ino}${arquivoPropriedades.dev}`;
+                        let indexSistemaDoArquivo = getIndexSistemaLink(arquivoEncontrado.caminhoCompleto);
 
+                        // Se combinar o ID desse arquivo com o que tem no cache, é o mesmo arquivo só que renomeado
                         if (arquivoNoCache.indexSistema == indexSistemaDoArquivo) {
                             novoNomeSeRenomeado = arquivoEncontrado.nomeExtensao;
                             arquivoExisteAinda = true;
@@ -107,14 +149,18 @@ export class RegistradorEvento {
                         }
                     }
 
-                    // Se o arquivo existir ainda, é pq foi renomeado
+                    // Se o arquivo existir, é pq foi renomeado realmente
                     if (arquivoExisteAinda) {
                         this.log(`Arquivo foi renomeado para ${novoNomeSeRenomeado}`);
 
+                        // Emitir o evento de renomeação
                         this.gerenciadorListener.dispararEvento(RegistradorEventoTiposEventos.ARQUIVO_RENOMEADO, nomeLink, novoNomeSeRenomeado);
                     } else {
-                        // O arquivo foi excluido mesmo do diretorio em que ele se encontra
+
+                        // O arquivo foi excluido do diretorio em que ele se encontra
                         this.log(`O arquivo foi excluido`);
+
+                        // Emitir o evento de exclusão
                         this.gerenciadorListener.dispararEvento(RegistradorEventoTiposEventos.ARQUIVO_DELETADO, nomeLink);
                     }
                 } else {
@@ -122,18 +168,26 @@ export class RegistradorEvento {
                 }
 
             } else if (tipoDoLinkNoCache == "diretorio") {
-                // Se for um diretorio
+                // Se o link em questão for um diretório
 
+
+                // Encontra o diretorio que foi modificado no cache
                 let diretorioNoCache = this.instanciaDiretorio.diretorios.find(dirObj => dirObj.nome == nomeLink);
                 if (diretorioNoCache != undefined) {
 
+                    // Se o diretorio ainda existe
                     let diretorioExisteAinda = false;
+                    // Novo nome do diretorio se foi renomeado
                     let novoNomeSeRenomeado = '';
-                    for (const diretorioEncontrado of linksDiretorio.diretorios) {
-                        let arquivoPropriedades = fs.statSync(diretorioEncontrado.caminhoCompleto);
-                        let indexSistemaDoDiretorio = `${arquivoPropriedades.ino}${arquivoPropriedades.dev}`;
 
+                    // Passar por cada diretório existente, e verificar se o ID unico dele combina com o anterior do cache
+                    for (const diretorioEncontrado of linksDiretorio.diretorios) {
+                        let indexSistemaDoDiretorio = getIndexSistemaLink(diretorioEncontrado.caminhoCompleto);
+
+                        // Se o ID index do sistema combinar com o ID que tenho no cache, é pq o diretorio é o mesmo, só foi renomeado
                         if (diretorioNoCache.indexSistema == indexSistemaDoDiretorio) {
+
+                            // Salva as informações que foi renomeado e o novo nome
                             diretorioExisteAinda = true;
                             novoNomeSeRenomeado = diretorioEncontrado.nome;
                             break;
@@ -143,10 +197,12 @@ export class RegistradorEvento {
                     if (diretorioExisteAinda) {
                         this.log(`O diretorio foi renomeado para ${novoNomeSeRenomeado}`);
 
+                        // Emitir o evento que o diretorio foi renomeado, passando como 1 argumento o antigo nome, e o novo nome
                         this.gerenciadorListener.dispararEvento(RegistradorEventoTiposEventos.DIRETORIO_RENOMEADO, nomeLink, novoNomeSeRenomeado);
                     } else {
                         this.log(`O diretorio foi excluido!`);
 
+                        // Emitir o evento que o diretório foi excluido
                         this.gerenciadorListener.dispararEvento(RegistradorEventoTiposEventos.DIRETORIO_DELETADO, nomeLink);
                     }
                 } else {
@@ -157,7 +213,6 @@ export class RegistradorEvento {
                 this.log(`Arquivo não foi encontrado no meu cache!`);
             }
         }
-
     }
 
     /**
@@ -167,7 +222,10 @@ export class RegistradorEvento {
      */
 
     /**
-     * @param {ArquivoCriado} funcaoCallback
+     * Executar uma função quando um arquivo for criado
+     ** Essa função pode ser chamada várias vezes, a cada vez será adicionada um listener novo com um ID unico para cancelamento caso desejado
+     * @param {ArquivoCriado} funcaoCallback - Função para executar
+     * @returns {Number} - Retorna um numero ID do listener criado, para cancelamento futuro
      */
     onArquivoCriado(funcaoCallback) {
         let novoEvento = this.gerenciadorListener.addEvento(RegistradorEventoTiposEventos.ARQUIVO_CRIADO, funcaoCallback);
@@ -183,7 +241,9 @@ export class RegistradorEvento {
      */
 
     /**
-     * @param {ArquivoRenomeado} funcaoCallback
+     * Uma função para executar quando um arquivo for renomeado
+     * @param {ArquivoRenomeado} funcaoCallback - Função para executar
+    * @returns {Number} - Retorna um numero ID do listener criado, para cancelamento futuro
      */
     onArquivoRenomeado(funcaoCallback) {
         let novoEvento = this.gerenciadorListener.addEvento(RegistradorEventoTiposEventos.ARQUIVO_RENOMEADO, funcaoCallback);
@@ -198,7 +258,9 @@ export class RegistradorEvento {
      */
 
     /**
+     * Uma função para executar quando um arquivo é deletado
      * @param {ArquivoDeletado} funcaoCallback
+     * @returns {Number} - Retorna um numero ID do listener criado, para cancelamento futuro
      */
     onArquivoDeletado(funcaoCallback) {
         let novoEvento = this.gerenciadorListener.addEvento(RegistradorEventoTiposEventos.ARQUIVO_DELETADO, funcaoCallback);
@@ -213,7 +275,9 @@ export class RegistradorEvento {
      */
 
     /**
-     * @param {DiretorioCriado} funcaoCallback
+     * Uma função para executar quando um novo diretório é criado
+     * @param {DiretorioCriado} funcaoCallback - Função para executar
+     * @returns {Number} - Retorna um numero ID do listener criado, para cancelamento futuro
      */
     onDiretorioCriado(funcaoCallback) {
         let novoEvento = this.gerenciadorListener.addEvento(RegistradorEventoTiposEventos.DIRETORIO_CRIADO, funcaoCallback);
@@ -229,14 +293,15 @@ export class RegistradorEvento {
      */
 
     /**
-     * @param {DiretorioRenomeado} funcaoCallback
+     * Uma função para executar quando um diretório for renomeado
+     * @param {DiretorioRenomeado} funcaoCallback - Função para executar
+     * @returns {Number} - Retorna um numero ID do listener criado, para cancelamento futuro
      */
     onDiretorioRenomeado(funcaoCallback) {
         let novoEvento = this.gerenciadorListener.addEvento(RegistradorEventoTiposEventos.DIRETORIO_RENOMEADO, funcaoCallback);
 
         return novoEvento;
     }
-
 
     /**
      * Uma função para executar quando um diretorio é deletado
@@ -245,7 +310,9 @@ export class RegistradorEvento {
      */
 
     /**
-     * @param {DiretorioDeletado} funcaoCallback
+     * Uma função para executar quando um diretório for deletado
+     * @param {DiretorioDeletado} funcaoCallback - Função para executar
+     * @returns {Number} - Retorna um numero ID do listener criado, para cancelamento futuro
      */
     onDiretorioDeletado(funcaoCallback) {
         let novoEvento = this.gerenciadorListener.addEvento(RegistradorEventoTiposEventos.DIRETORIO_DELETADO, funcaoCallback);
@@ -253,6 +320,10 @@ export class RegistradorEvento {
         return novoEvento;
     }
 
+    /**
+     * Escreve uma mensagem de log chamando a função de log do diretório vinculado a ele
+     * @param {String} msg 
+     */
     log(msg) {
         this.instanciaDiretorio.log(msg);
     }
